@@ -250,9 +250,15 @@ es = ElaAPI()
 #es.tokens_search()
 #es.tokens_delete("yggg")
 
+def getAccessToken(grant, userId):
+    
+
 def handler(event):
     # 보안 인증서 발급
     grant = es.login(event['userId'], event['password'])
+
+    # 액세스 토큰 발급
+    (grant['body']['grants'], event['userId'])
 
 if __name__ == "__main__":
     handler({'userId': 'hanseol', 'password': '123456'})

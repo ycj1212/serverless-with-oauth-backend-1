@@ -4,6 +4,8 @@ import json
 import random
 from datetime import datetime,timedelta
 import jwt
+import time
+import dateutil.parser import parse
 
 class ElaAPI:
     es = Elasticsearch(hosts="15.164.95.53", port=9200)   # 객체 생성
@@ -331,6 +333,59 @@ class ElaAPI:
                 'statusCode': 401,
                 'body': 'There is no grantsId'
             }
+            
+    def checkReTokens(cls,refreshToken):
+        res = cls.es.search(
+            index = "tokens",
+            body = {
+                "query":{"match_all":{}}
+            }
+        )
+        data = json.dumps(res, ensure_ascii=False, indent=4)
+        data = json.loads(data)
+        for i in range(len(data["hits"]["hits"])):
+            if data["hits"]["hits"][i]["_source"]["refreshToken"] == refreshToken:
+                comp = True
+                break
+            else:
+                comp = False
+        
+        if comp == True:
+            return {
+                'statusCode': 200,
+                'body': {
+                    'userId': data["hits"]["hits"][i]["_id"],
+                    'expired_refreshToken': data["hits"]["hits"][i]["_source"]["expired_refreshToken"]
+                }
+            }
+        else:
+            return {
+                'statusCode': 401,
+                'body': 'Expired RefreshToken'
+            }
+
+    def checkID(cls,username):
+        # 아이디 존재 여부 탐색
+        res = cls.es.search(
+                index = "users",
+                body = {
+                    "query": {
+                        "match" : {
+                            "_id" : username
+                        }
+                    }
+                })
+        boolean_value = res["hits"]["total"]["value"]
+        if boolean_value == 1:
+            return {
+                'statusCode': 200,
+                'body': 'Success!!!!'
+            }
+        else:
+            return {
+                'statusCode': 401,
+                'body': 'Not equals ID'
+            }
 
 es = ElaAPI()
 
@@ -394,8 +449,79 @@ def handler(event):
                 # 액세스, 리프레시 토큰 발급
                 token = es.tokens_dataInsert(decoded['userId'])
 
-
+                # 액세스 토큰 검증
                 comT = es.checkTokens(token['body']['accessToken'])
+
+                if comT['statusCode'] == 401:
+                    return comT
+
+                else:
+                    at = comT['body']['expired_accessToken']
+                    dt = parse(at)
+                    nd = datetime.now()
+                    
+                    # 액세스 토큰 만료 시
+                    if nd > dt:
+                        returnValue = {
+                            'statusCode': 403,
+                            'body': 'Expired accessToken'
+                        }
+                    
+                    else:
+                        decodeAt = jwt.decode(
+                            token['body']['accessToken'],
+                            ''+event['userId'],
+                            algorithms = ['HS256']
+                        )
+                        check = es.checkID(decodeAt['userId'])
+
+                        # 엑세스 토큰 검증 성공 또는 실패 시
+                        return check
+                
+                # 액세스 토큰 만료 시
+                if returnValue['statusCode'] == 403:
+
+                    checkRt = es.checkReTokens(token['body']['refreshToken'])
+                    if checkRt['statusCode'] == 200:
+                        print(checkRt)
+                        at = checkRt['body']['expired_refreshToken']
+                        dt = parse(at)
+                        nd = datetime.now()
+
+                        if nd > dt:
+                            returnValue = {
+                                'statusCode': 403,
+                                'body': 'Expired refreshToken'
+                            }
+
+                        else:
+                            decodedRt = jwt.decode(
+                                token['body']['refreshToken'],
+                                ''+event['userId'],
+                                algorithms = ['HS256']
+                            )
+                            check = es.checkID(decodedRt['userId'])
+
+                            if check == 1:
+                                es.tokens_delete(decodedRt['userId'])
+                                final = es.tokens_dataInsert(decodedRt['userId'])
+                                print('final')
+                                print(final)
+                                return {
+                                    'statusCode': 200,
+                                    'body': {
+                                        'accessToken': final['body']['accessToken'],
+                                        'refreshToken': final['body']['refreshToken']
+                                    }
+                                }
+
+                            else:
+                                return {
+                                    'statusCode': 401,
+                                    'body': 'Not equals ID'
+                                }
+
+                            
 
 
 

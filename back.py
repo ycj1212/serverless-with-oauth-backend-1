@@ -302,6 +302,36 @@ class ElaAPI:
                 'body': 'There is no userId'
             }
 
+    def checkTokens(cls,token):
+        res = cls.es.search(
+            index = "tokens",
+            body = {
+                "query":{"match_all":{}}
+            }
+        )
+        data = json.dumps(res, ensure_ascii=False, indent=4)
+        data = json.loads(data)
+        for i in range(len(data["hits"]["hits"])):
+            if data["hits"]["hits"][i]["_source"]["accessToken"] == token:
+                comp = True
+                break
+            else:
+                comp = False
+        
+        if comp == True:
+            return {
+                'statusCode': 200
+                'body': {
+                    'userId': data["hits"]["hits"][i]["_id"],
+                    'expired_accessToken': data["hits"]["hits"][i]["_source"]["expired_accessToken"]
+                }
+            }
+        else:
+            return {
+                'statusCode': 401,
+                'body': 'There is no grantsId'
+            }
+
 es = ElaAPI()
 
 #es.users_dataInsert("hanseol","123456")
@@ -362,7 +392,12 @@ def handler(event):
                 es.grants_delete(decoded['userId'])
 
                 # 액세스, 리프레시 토큰 발급
-                tokens = es.tokens_dataInsert(decoded['userId'])
+                token = es.tokens_dataInsert(decoded['userId'])
+
+
+                comT = es.checkTokens(token['body']['accessToken'])
+
+
 
 if __name__ == "__main__":
     handler({'userId': 'hanseol', 'password': '123456'})

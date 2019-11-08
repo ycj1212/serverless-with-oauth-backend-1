@@ -2,24 +2,26 @@ from elasticsearch import Elasticsearch
 import pprint as ppr
 import json
 import random
-from datetime import datetime,timedelta
 import jwt
 import time
-import dateutil.parser import parse
+from datetime import datetime,timedelta
+from dateutil.parser import parse
 
 class ElaAPI:
-    es = Elasticsearch(hosts="15.164.95.53", port=9200)   # 객체 생성
-    def allIndex(cls):
-        # Elasticsearch에 있는 모든 Index 조회
-        print (cls.es.cat.indices())
+    # 객체 생성
+    es = Elasticsearch(hosts="54.180.97.228", port=9200)
 
-#재헌이꺼 시작
+    '''
+        # 보안 인증서 삽입
+        # @param {string} event.userId user id
+        # @return {Object} status massege
+    ''' 
     def grants_dataInsert(cls,username):
-        #datetime init
+        # init datetime
         now = datetime.now()
         current = str(now.isoformat())
         next_current = str(now+timedelta(seconds=5))
-        # 아이디 jwt 인코딩
+        # grant id encoding 
         encodedId = jwt.encode(
             {
                 'userId': username,
@@ -27,8 +29,7 @@ class ElaAPI:
             },
             ''+username+current,
             algorithm = 'HS256'
-        )
-        print(type(encodedId))
+        ).decode('utf-8')
         encodedId = str(encodedId)
         grants_data = {
             "id" : encodedId,
@@ -45,17 +46,16 @@ class ElaAPI:
                 }
             })
         boolean_value = res["hits"]["total"]["value"]
+        # userId가 DB에 없는 경우
         if boolean_value == 0:
-            res = cls.es.index(index="grants",doc_type="_doc",id=username,body=grants_data)
-            print(res)
             return {
                 'statusCode': 200,
                 'body': {
                     'grants': encodedId
                 }
             }
+        # userId가 DB에 있는 경우
         else:
-            print("Grants: user already exist")
             for i in range(len(res["hits"]["hits"])):
                 if res["hits"]["hits"][i]["_id"] == username:
                     return {
@@ -64,32 +64,25 @@ class ElaAPI:
                             'grants': res['hits']['hits'][i]['_source']['id']
                         }
                     }
-                    
-    def grants_search(cls, index=None):
-        res = cls.es.search(
-            index = "grants",
-            body = {
-                "query":{"match_all":{}}
-            }
-        )
-        data = json.dumps(res, ensure_ascii=False, indent=4)
-        data = json.loads(data)
-        for i in range(len(data["hits"]["hits"])):
-            print(data["hits"]["hits"][i]["_id"])
-            print(data["hits"]["hits"][i]["_source"]["id"])
-            print(data["hits"]["hits"][i]["_source"]["created"])
-            print(data["hits"]["hits"][i]["_source"]["expired"])
     
+    '''
+        # 보안 인증서 삭제
+        # @param {string} event.userId user id
+    ''' 
     def grants_delete(cls,username):
-        res = cls.es.delete(index="grants",doc_type="_doc",id=username)
-        print(res)
+        cls.es.delete(index="grants",doc_type="_doc",id=username)
     
-#재헌이꺼 끝
-##철주꺼 시작
+    '''
+        # 토큰 삽입
+        # @param {string} event.userId user id
+        # @return {Object} status massege
+    ''' 
     def tokens_dataInsert(cls,username):
+        # init datetime
         now = datetime.now()
         expired_accessToken = str(now+timedelta(hours=1))
         expired_refreshToken = str(now+timedelta(hours=12))
+        # accessToken encoding
         accessToken = jwt.encode(
             {
                 'userId': username,
@@ -98,6 +91,7 @@ class ElaAPI:
             ''+username,
             algorithm = 'HS256'
         ).decode('utf-8')
+        # refreshToken encoding
         refreshToken = jwt.encode(
             {
                 'userId': username,
@@ -124,6 +118,7 @@ class ElaAPI:
                 }
             })
         boolean_value = res["hits"]["total"]["value"]
+        # userId가 DB에 없는 경우
         if boolean_value == 0:
             res = cls.es.index(index="tokens",doc_type="_doc",id=username,body=tokens_data)
             return {
@@ -133,8 +128,8 @@ class ElaAPI:
                     'refreshToken': refreshToken
                 }
             }
+        # userId가 DB에 있는 경우
         else:
-            print("Tokens: user already exist")
             for i in range(len(res["hits"]["hits"])):
                 if res["hits"]["hits"][i]["_id"] == username:
                     return {
@@ -144,26 +139,11 @@ class ElaAPI:
                             'refreshToken': res["hits"]["hits"][i]["_source"]["refreshToken"]
                         }
                     }
-
-
-    def tokens_search(cls, indx=None):
-    # ===============
-    # 데이터 조회 [전체]
-    # ===============
-        res = cls.es.search(
-        index = "tokens",
-        body = {
-            "query":{"match_all":{}}
-            }
-        )
-        data = json.dumps(res, ensure_ascii=False, indent=4)
-        data = json.loads(data)
-        for i in range(len(data["hits"]["hits"])):
-            print(data["hits"]["hits"][i]["_id"])
-            print(data["hits"]["hits"][i]["_source"]["accessToken"])
-            print(data["hits"]["hits"][i]["_source"]["refreshToken"])
-            print(data["hits"]["hits"][i]["_source"]["expired_accessToken"])
-            print(data["hits"]["hits"][i]["_source"]["expired_refreshToken"])
+    
+    '''
+        # 토큰 삭제
+        # @param {string} event.userId user id
+    '''
     def tokens_delete(cls,username):
         res = cls.es.search(
                 index = "users",
@@ -176,65 +156,15 @@ class ElaAPI:
                 })
         boolean_value = res["hits"]["total"]["value"]
         if boolean_value == 1:
-            res = cls.es.delete(index="tokens",doc_type="_doc",id=username)
-            print("success delete for tokens")
-        else:
-            print("not exist username for tokens")
-#철쭈꺼 끝
-#한설꺼 시작
-    def users_search(cls, index=None):
-    # ===============
-    # 데이터 조회 [전체]
-    # ===============
-        res = cls.es.search(
-        index = "users",
-        body = {
-            "query":{"match_all":{}}
-            }
-        )
-        data = json.dumps(res, ensure_ascii=False, indent=4)
-        data = json.loads(data)
-        for i in range(len(data["hits"]["hits"])):
-            print(data["hits"]["hits"][i]["_id"])
-            print(data["hits"]["hits"][i]["_source"]["password"])
+            cls.es.delete(index="tokens",doc_type="_doc",id=username)
 
-    def users_dataInsert(cls,username,password):
-        users_data = {
-            "password" : password,
-            }
-        res = cls.es.search(
-            index = "users",
-            body = {
-                "query": {
-                    "match" : {
-                        "_id" : username
-                    }
-                }
-            })
-        boolean_value = res["hits"]["total"]["value"]
-        if boolean_value == 0:
-            res = cls.es.index(index="users",doc_type="_doc",id=username,body=users_data)
-            print(res)
-        else:
-            print("user already exist")
-            
-    def users_delete(cls,username):
-        res = cls.es.search(
-                index = "users",
-                body = {
-                    "query": {
-                        "match" : {
-                            "_id" : username
-                        }
-                    }
-                })
-        boolean_value = res["hits"]["total"]["value"]
-        if boolean_value == 1:
-            res = cls.es.delete(index="users",doc_type="_doc",id=username)
-            print("success delete for users")
-        else:
-            print("not exist username for users")
 
+    '''
+        # login
+        # @param {string} event.userId user id
+        # @param {string} event.password user password
+        # @return {Object} status massege
+    '''
     def login(cls,username,passwd):
         # 아이디 존재 여부 탐색
         res = cls.es.search(
@@ -252,29 +182,26 @@ class ElaAPI:
             ps = res["hits"]["hits"][0]["_source"]["password"]
             # 비밀번호 O
             if passwd == ps:
-                print("Login: verified")
                 grantsId = cls.grants_dataInsert(username)
                 return grantsId
             # 비밀번호 X
             else:
-                print("Login: failed")
                 return {
                     'statusCode': 401,
                     'body': 'Incorrect password'
                 }
         # 아이디 X
         else:
-            print("Login: not exist user")
             return {
                 'statusCode': 401,
                 'body': 'There is no userId'
             }
-        
-#한설꺼 끝
-    def deleteIndex(cls,index_name):
-        cls.es.indices.delete(index=index_name)
 
-
+    '''
+        # check whether grant exists
+        # @param {string} grant.body.grants grant id
+        # @return {Object} status massege
+    '''
     def checkGrants(cls,grant):
         res = cls.es.search(
             index = "grants",
@@ -304,6 +231,11 @@ class ElaAPI:
                 'body': 'There is no userId'
             }
 
+    '''
+        # check whether access token exists
+        # @param {string} token.body.accessToken access token
+        # @return {Object} status massege
+    '''
     def checkTokens(cls,token):
         res = cls.es.search(
             index = "tokens",
@@ -322,7 +254,7 @@ class ElaAPI:
         
         if comp == True:
             return {
-                'statusCode': 200
+                'statusCode': 200,
                 'body': {
                     'userId': data["hits"]["hits"][i]["_id"],
                     'expired_accessToken': data["hits"]["hits"][i]["_source"]["expired_accessToken"]
@@ -334,6 +266,11 @@ class ElaAPI:
                 'body': 'There is no grantsId'
             }
 
+    '''
+        # check whether refresh token exists
+        # @param {string} token.body.refreshToken refresh token
+        # @return {Object} status massege
+    '''
     def checkReTokens(cls,refreshToken):
         res = cls.es.search(
             index = "tokens",
@@ -364,6 +301,11 @@ class ElaAPI:
                 'body': 'Expired RefreshToken'
             }
 
+    '''
+        # check whether user id exists
+        # @param {string} event.userId user id
+        # @return {Object} status massege
+    '''
     def checkID(cls,username):
         # 아이디 존재 여부 탐색
         res = cls.es.search(
@@ -387,8 +329,15 @@ class ElaAPI:
                 'body': 'Not equals ID'
             }
 
+# 객체 생성
 es = ElaAPI()
 
+'''
+    # @param {Object} event user account
+    # @param {string} event.userId user id
+    # @param {string} event.password user password
+    # @return {Object} status message
+'''
 def handler(event):
     # 보안 인증서 발급
     grant = es.login(event['userId'], event['password'])
@@ -417,7 +366,6 @@ def handler(event):
                 ''+event['userId']+created,
                 algorithms = ['HS256']
             )
-            
             # 디코딩 결과의 userId와 DB의 userId가 다른 경우
             if decoded['userId'] != event['userId']:
                 return {
@@ -434,6 +382,7 @@ def handler(event):
                 token = es.tokens_dataInsert(decoded['userId'])
 
                 # 액세스 토큰 검증
+                time.sleep(1)
                 comT = es.checkTokens(token['body']['accessToken'])
 
                 if comT['statusCode'] == 401:
@@ -513,4 +462,4 @@ def handler(event):
                                 }
 
 if __name__ == "__main__":
-    handler({'userId': 'hanseol', 'password': '123456'})
+    handler({'userId': 'test', 'password': '1234'})

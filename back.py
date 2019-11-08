@@ -86,14 +86,32 @@ class ElaAPI:
 ##철주꺼 시작
     def tokens_dataInsert(cls,username):
         now = datetime.now()
-        current = str(now.isoformat())
-        next_current = str(now+timedelta(hours=1))
+        expired_accessToken = str(now+timedelta(hours=1))
+        expired_refreshToken = str(now+timedelta(hours=12))
+        accessToken = jwt.encode(
+            {
+                'userId': username,
+                'expired_accessToken': expired_accessToken
+            },
+            ''+username,
+            algorithm = 'HS256'
+        ).decode('utf-8')
+        refreshToken = jwt.encode(
+            {
+                'userId': username,
+                'expired_refreshToken': expired_refreshToken
+            },
+            ''+username,
+            algorithm = 'HS256'
+        ).decode('utf-8')
+        accessToken = str(accessToken)
+        refreshToken = str(refreshToken)
         tokens_data = {
-            "accessToken" : "value of accessToken",
-            "refreshToken" : "value of refreshToken",
-            "expired_accessToken" : current,
-            "expired_refreshToken" : next_current
-            }
+            "accessToken" : accessToken,
+            "refreshToken" : refreshToken,
+            "expired_accessToken" : expired_accessToken,
+            "expired_refreshToken" : expired_refreshToken
+        }
         res = cls.es.search(
             index = "tokens",
             body = {
@@ -106,9 +124,24 @@ class ElaAPI:
         boolean_value = res["hits"]["total"]["value"]
         if boolean_value == 0:
             res = cls.es.index(index="tokens",doc_type="_doc",id=username,body=tokens_data)
-            print(res)
+            return {
+                'statusCode': 200,
+                'body': {
+                    'accessToken': accessToken,
+                    'refreshToken': refreshToken
+                }
+            }
         else:
-            print("user already exist")
+            print("Tokens: user already exist")
+            for i in range(len(res["hits"]["hits"])):
+                if res["hits"]["hits"][i]["_id"] == username:
+                    return {
+                        'statusCode': 200,
+                        'body': {
+                            'accessToken': res["hits"]["hits"][i]["_source"]["accessToken"],
+                            'refreshToken': res["hits"]["hits"][i]["_source"]["refreshToken"]
+                        }
+                    }
 
 
     def tokens_search(cls, indx=None):
@@ -325,8 +358,11 @@ def handler(event):
 
             # 디코딩 결과의 userId와 DB의 userId가 같은 경우
             else:
+                # 인증서 삭제
                 es.grants_delete(decoded['userId'])
-        
+
+                # 액세스, 리프레시 토큰 발급
+                tokens = es.tokens_dataInsert(decoded['userId'])
 
 if __name__ == "__main__":
     handler({'userId': 'hanseol', 'password': '123456'})

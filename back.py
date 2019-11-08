@@ -333,7 +333,7 @@ class ElaAPI:
                 'statusCode': 401,
                 'body': 'There is no grantsId'
             }
-            
+
     def checkReTokens(cls,refreshToken):
         res = cls.es.search(
             index = "tokens",
@@ -388,22 +388,6 @@ class ElaAPI:
             }
 
 es = ElaAPI()
-
-#es.users_dataInsert("hanseol","123456")
-#es.users_search()
-#es.users_delete("ko")
-#es.login("hanseol","1212412456")
-
-#es.grants_dataInsert("senkl")
-#es.grants_search()
-#es.grants_delete('kohanseol')
-
-#es.tokens_dataInsert("yang")
-#es.tokens_search()
-#es.tokens_delete("yggg")
-
-#def getAccessToken(grant, userId):
-
 
 def handler(event):
     # 보안 인증서 발급
@@ -475,19 +459,25 @@ def handler(event):
                         )
                         check = es.checkID(decodeAt['userId'])
 
-                        # 엑세스 토큰 검증 성공 또는 실패 시
+                        # 엑세스 토큰으로 아이디 검증 성공 또는 실패 시
                         return check
                 
                 # 액세스 토큰 만료 시
                 if returnValue['statusCode'] == 403:
-
+                    # 리프레시 토큰 검증
                     checkRt = es.checkReTokens(token['body']['refreshToken'])
-                    if checkRt['statusCode'] == 200:
-                        print(checkRt)
+                    
+                    # 검증 실패 시
+                    if checkRt['statusCode'] == 401:
+                        return checkRt
+                    
+                    # 검증 성공 시
+                    else:
                         at = checkRt['body']['expired_refreshToken']
                         dt = parse(at)
                         nd = datetime.now()
 
+                        # 리프레시 토큰 만료 시
                         if nd > dt:
                             returnValue = {
                                 'statusCode': 403,
@@ -501,12 +491,12 @@ def handler(event):
                                 algorithms = ['HS256']
                             )
                             check = es.checkID(decodedRt['userId'])
-
+                            # 리프레시 토큰으로 아이디 검증 성공 시
                             if check == 1:
+                                # 토큰 제거
                                 es.tokens_delete(decodedRt['userId'])
+                                # 토큰 삽입
                                 final = es.tokens_dataInsert(decodedRt['userId'])
-                                print('final')
-                                print(final)
                                 return {
                                     'statusCode': 200,
                                     'body': {
@@ -515,15 +505,12 @@ def handler(event):
                                     }
                                 }
 
+                            # 리프레시 토큰으로 아이디 검증 실패 시
                             else:
                                 return {
                                     'statusCode': 401,
                                     'body': 'Not equals ID'
                                 }
-
-                            
-
-
 
 if __name__ == "__main__":
     handler({'userId': 'hanseol', 'password': '123456'})

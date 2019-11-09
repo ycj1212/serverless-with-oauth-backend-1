@@ -51,26 +51,13 @@ class ElaAPI:
 
         boolean_value = res["hits"]["total"]["value"]
 
-        # userId가 DB에 없는 경우
-        if boolean_value == 0:
-            cls.es.index(index="grants",doc_type="_doc",id=userId,body=grants_data)
-            return {
-                'statusCode': 200,
-                'body': {
-                    'grants': encodedId
-                }
+        cls.es.index(index="grants",doc_type="_doc",id=userId,body=grants_data)
+        return {
+            'statusCode': 200,
+            'body': {
+                'grants': encodedId
             }
-
-        # userId가 DB에 있는 경우
-        else:
-            for i in range(len(res["hits"]["hits"])):
-                if res["hits"]["hits"][i]["_id"] == userId:
-                    return {
-                        'statusCode': 200,
-                        'body': {
-                            'grants': res['hits']['hits'][i]['_source']['id']
-                        }
-                    }
+        }
     
     # 보안 인증서 삭제
     # @param {string} userId 
@@ -128,28 +115,14 @@ class ElaAPI:
 
         boolean_value = res["hits"]["total"]["value"]
 
-        # userId가 DB에 없는 경우
-        if boolean_value == 0:
-            res = cls.es.index(index="tokens",doc_type="_doc",id=userId,body=tokens_data)
-            return {
-                'statusCode': 200,
-                'body': {
-                    'accessToken': accessToken,
-                    'refreshToken': refreshToken
-                }
+        res = cls.es.index(index="tokens",doc_type="_doc",id=userId,body=tokens_data)
+        return {
+            'statusCode': 200,
+            'body': {
+                'accessToken': accessToken,
+                'refreshToken': refreshToken
             }
-
-        # userId가 DB에 있는 경우
-        else:
-            for i in range(len(res["hits"]["hits"])):
-                if res["hits"]["hits"][i]["_id"] == userId:
-                    return {
-                        'statusCode': 200,
-                        'body': {
-                            'accessToken': res["hits"]["hits"][i]["_source"]["accessToken"],
-                            'refreshToken': res["hits"]["hits"][i]["_source"]["refreshToken"]
-                        }
-                    }
+        }
     
     # 토큰 삭제
     # @param {string} userId
@@ -170,6 +143,35 @@ class ElaAPI:
         if boolean_value == 1:
             cls.es.delete(index="tokens",doc_type="_doc",id=userId)
 
+    # 회원가입
+    # @param {string} userId
+    # @param {string} passwd
+    # @return {Object} status message
+    def join(cls,userId,passwd):
+        users_data = {
+            "password" : passwd,
+        }
+        res = cls.es.search(
+            index = "users",
+            body = {
+                "query": {
+                    "match" : {
+                        "_id" : username
+                    }
+                }
+            })
+        boolean_value = res["hits"]["total"]["value"]
+        if boolean_value == 0:
+            cls.es.index(index="users",doc_type="_doc",id=userId,body=users_data)
+            return {
+                'statusCode': 201,
+                'body': 'Register success'
+            }
+        else:
+            return {
+                'statusCode': 401,
+                'body': 'user already exists'
+            }
 
     # login
     # @param {string} userId
@@ -350,152 +352,179 @@ class ElaAPI:
 # 객체 생성
 es = ElaAPI()
 
+# Get grant
 # @param {Object} event user account
 # @param {string} event.userId user id
 # @param {string} event.password user password
-# @return {Object} status message
-def handler(event):
+# @return {Object} status message and grantId
+def handler_resource_owner_server(event):
     userId = event['userId']
     passwd = event['password']
 
     # 보안 인증서 발급
     grant = es.login(userId, passwd) # 로그인
     time.sleep(1)
+    
+    return grant
 
-    # 로그인 검증 실패 시
-    if (grant['statusCode'] == 401):
-        return grant
+# Access resource
+# @param {string} accessToken
+# @return {Object} status message
+def handler_resource_server(accessToken):
+    # 액세스 토큰 검증
+    time.sleep(1)
+    comT = es.checkTokens(accessToken)
 
-    # 로그인 검증 성공 시(보안 인증서 발급)
+    # 액세스 토큰 검증 실패
+    if comT['statusCode'] == 401:
+        return comT
+
     else:
-        grantId = grant['body']['grants']
-        
-        # 인증서 검증
-        compG = es.checkGrants(grantId)
+        # expired_accessToken_time
+        at = comT['body']['expired_accessToken']
 
-        # 인증서 검증 실패 시
-        if compG['statusCode'] == 401:
-            return compG
+        # Type: string to datetime
+        dt = parse(at)
+
+        # current time
+        nd = datetime.now()
         
-        # 인증서 검증 성공 시
+        # 액세스 토큰 만료 시
+        if nd > dt:
+            return = {
+                'statusCode': 403,
+                'body': 'Expired accessToken'
+            }
+        
         else:
-            created = compG['body']['created']
+            decodeAt = jwt.decode(
+                accessToken,
+                ''+userId,
+                algorithms = ['HS256']
+            )
+            check = es.checkID(decodeAt['userId'])
 
-            # 암호화된 인증서 디코드
-            decoded = jwt.decode(
-                grantId,
-                ''+userId+created,
+            # 엑세스 토큰으로 아이디 검증 성공 또는 실패 시
+            return check
+
+
+# Get accessToken
+# @param {string} grantId
+# @return {Object} status message and tokens
+def getAccessToken(grantId):
+    compG = es.checkGrants(grantId)
+
+    # 인증서 검증 실패 시
+    if compG['statusCode'] == 401:
+        return compG
+    
+    # 인증서 검증 성공 시
+    else:
+        created = compG['body']['created']
+
+        # 암호화된 인증서 디코드
+        decoded = jwt.decode(
+            grantId,
+            ''+userId+created,
+            algorithms = ['HS256']
+        )
+
+        decode_userId = decoded['userId']
+
+        # 인증서 삭제
+        es.grants_delete(decoded_userId)
+
+        # 디코딩 결과의 userId와 DB의 userId가 다른 경우
+        if decoded_userId != userId:
+            return {
+                'statusCode': 401,
+                'body': 'Invalid user'
+            }
+
+        # 디코딩 결과의 userId와 DB의 userId가 같은 경우
+        else:
+            # 액세스, 리프레시 토큰 발급
+            token = es.tokens_dataInsert(decoded_userId)
+            return token
+    
+# Update tokens
+# @param {string} refreshToken
+# @return {Object} status message and updated tokens
+def updateToken(refreshToken):
+    # 리프레시 토큰 검증
+    checkRt = es.checkReTokens(refreshToken)
+
+    # 검증 실패 시
+    if checkRt['statusCode'] == 401:
+        return checkRt
+
+    # 검증 성공 시
+    else:
+        # expired_refreshToken_time
+        at = checkRt['body']['expired_refreshToken']
+
+        # Type: string to datetime
+        dt = parse(at)
+
+        # current time
+        nd = datetime.now()
+
+        # 리프레시 토큰 만료 시
+        if nd > dt:
+            returnValue = {
+                'statusCode': 403,
+                'body': 'Expired refreshToken'
+            }
+
+        else:
+            decodedRt = jwt.decode(
+                refreshToken,
+                ''+userId,
                 algorithms = ['HS256']
             )
 
-            decode_userId = decoded['userId']
-            # 디코딩 결과의 userId와 DB의 userId가 다른 경우
-            if decoded_userId != userId:
+            decoded_userId = decodedRt['userId']
+
+            check = es.checkID(decoded_userId)
+            # 리프레시 토큰으로 아이디 검증 성공 시
+            if check == 1:
+                # 토큰 제거
+                es.tokens_delete(decoded_userId)
+                # 토큰 삽입
+                final = es.tokens_dataInsert(decoded_userId)
+                return {
+                    'statusCode': 200,
+                    'body': {
+                        'accessToken': final['body']['accessToken'],
+                        'refreshToken': final['body']['refreshToken']
+                    }
+                }
+
+            # 리프레시 토큰으로 아이디 검증 실패 시
+            else:
                 return {
                     'statusCode': 401,
                     'body': 'Invalid user'
                 }
 
-            # 디코딩 결과의 userId와 DB의 userId가 같은 경우
-            else:
-                # 인증서 삭제
-                es.grants_delete(decoded_userId)
-
-                # 액세스, 리프레시 토큰 발급
-                token = es.tokens_dataInsert(decoded_userId)
-
-                # 액세스 토큰 검증
-                time.sleep(1)
-                comT = es.checkTokens(token['body']['accessToken'])
-
-                if comT['statusCode'] == 401:
-                    return comT
-
-                else:
-                    # expired_accessToken_time
-                    at = comT['body']['expired_accessToken']
-
-                    # Type: string to datetime
-                    dt = parse(at)
-
-                    # current time
-                    nd = datetime.now()
-                    
-                    # 액세스 토큰 만료 시
-                    if nd > dt:
-                        returnValue = {
-                            'statusCode': 403,
-                            'body': 'Expired accessToken'
-                        }
-                    
-                    else:
-                        decodeAt = jwt.decode(
-                            token['body']['accessToken'],
-                            ''+userId,
-                            algorithms = ['HS256']
-                        )
-                        check = es.checkID(decodeAt['userId'])
-
-                        # 엑세스 토큰으로 아이디 검증 성공 또는 실패 시
-                        return check
-                
-                # 액세스 토큰 만료 시
-                if returnValue['statusCode'] == 403:
-                    # 리프레시 토큰 검증
-                    checkRt = es.checkReTokens(token['body']['refreshToken'])
-                    
-                    # 검증 실패 시
-                    if checkRt['statusCode'] == 401:
-                        return checkRt
-                    
-                    # 검증 성공 시
-                    else:
-                        # expired_refreshToken_time
-                        at = checkRt['body']['expired_refreshToken']
-
-                        # Type: string to datetime
-                        dt = parse(at)
-
-                        # current time
-                        nd = datetime.now()
-
-                        # 리프레시 토큰 만료 시
-                        if nd > dt:
-                            returnValue = {
-                                'statusCode': 403,
-                                'body': 'Expired refreshToken'
-                            }
-
-                        else:
-                            decodedRt = jwt.decode(
-                                token['body']['refreshToken'],
-                                ''+userId,
-                                algorithms = ['HS256']
-                            )
-
-                            decoded_userId = decodedRt['userId']
-
-                            check = es.checkID(decoded_userId)
-                            # 리프레시 토큰으로 아이디 검증 성공 시
-                            if check == 1:
-                                # 토큰 제거
-                                es.tokens_delete(decoded_userId)
-                                # 토큰 삽입
-                                final = es.tokens_dataInsert(decoded_userId)
-                                return {
-                                    'statusCode': 200,
-                                    'body': {
-                                        'accessToken': final['body']['accessToken'],
-                                        'refreshToken': final['body']['refreshToken']
-                                    }
-                                }
-
-                            # 리프레시 토큰으로 아이디 검증 실패 시
-                            else:
-                                return {
-                                    'statusCode': 401,
-                                    'body': 'Invalid user'
-                                }
+# Get accessToken or Update tokens
+# @param {string} grantId
+# @param {string} refreshToken
+# @return {Object} status message and tokens
+def handler_authorization_server(grantId, refreshToken):
+    if grantId:
+        return getAccessToken(grantId)
+    else:
+        return updateToken(refreshToken)
 
 if __name__ == "__main__":
-    handler({'userId': 'test', 'password': '1234'})
+    # 회원가입
+    es.join({'userId': 'test', 'password': '1234'})
+
+    grant = handler_resource_owner_server({'userId': 'test', 'password': '1234'})
+
+    token = handler_authorization_server(grant['body']['grant'])
+
+    resource = handler_resource_server(token['body']['accessToken'])
+
+    update = handler_authorization_server(token['body']['refreshToken'])

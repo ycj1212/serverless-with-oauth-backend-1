@@ -11,53 +11,60 @@ class ElaAPI:
     # 객체 생성
     es = Elasticsearch(hosts="54.180.97.228", port=9200)
 
-    '''
-        # 보안 인증서 삽입
-        # @param {string} event.userId user id
-        # @return {Object} status massege
-    ''' 
-    def grants_dataInsert(cls,username):
+    # 보안 인증서 삽입
+    # @param {string} userId
+    # @return {Object} status massege and encoded grantId
+    def grants_dataInsert(cls,userId):
         # init datetime
         now = datetime.now()
         current = str(now.isoformat())
         next_current = str(now+timedelta(seconds=5))
+
         # grant id encoding 
         encodedId = jwt.encode(
             {
-                'userId': username,
+                'userId': userId,
                 'created': current
             },
-            ''+username+current,
+            ''+userId+current,
             algorithm = 'HS256'
         ).decode('utf-8')
         encodedId = str(encodedId)
+
+        # create grants_data
         grants_data = {
             "id" : encodedId,
             "created" : current,
             "expired" : next_current
         }
+
+        # search userId
         res = cls.es.search(
             index = "grants",
             body = {
                 "query": {
                     "match" : {
-                        "_id" : username
+                        "_id" : userId
                     }
                 }
             })
+
         boolean_value = res["hits"]["total"]["value"]
+
         # userId가 DB에 없는 경우
         if boolean_value == 0:
+            cls.es.index(index="grants",doc_type="_doc",id=userId,body=grants_data)
             return {
                 'statusCode': 200,
                 'body': {
                     'grants': encodedId
                 }
             }
+
         # userId가 DB에 있는 경우
         else:
             for i in range(len(res["hits"]["hits"])):
-                if res["hits"]["hits"][i]["_id"] == username:
+                if res["hits"]["hits"][i]["_id"] == userId:
                     return {
                         'statusCode': 200,
                         'body': {
@@ -65,62 +72,65 @@ class ElaAPI:
                         }
                     }
     
-    '''
-        # 보안 인증서 삭제
-        # @param {string} event.userId user id
-    ''' 
-    def grants_delete(cls,username):
-        cls.es.delete(index="grants",doc_type="_doc",id=username)
+    # 보안 인증서 삭제
+    # @param {string} userId 
+    def grants_delete(cls,userId):
+        cls.es.delete(index="grants",doc_type="_doc",id=userId)
     
-    '''
-        # 토큰 삽입
-        # @param {string} event.userId user id
-        # @return {Object} status massege
-    ''' 
-    def tokens_dataInsert(cls,username):
+
+    # 토큰 삽입
+    # @param {string} event.userId
+    # @return {Object} status massege and encoded tokens
+    def tokens_dataInsert(cls,userId):
         # init datetime
         now = datetime.now()
         expired_accessToken = str(now+timedelta(hours=1))
         expired_refreshToken = str(now+timedelta(hours=12))
+
         # accessToken encoding
         accessToken = jwt.encode(
             {
-                'userId': username,
+                'userId': userId,
                 'expired_accessToken': expired_accessToken
             },
-            ''+username,
+            ''+userId,
             algorithm = 'HS256'
         ).decode('utf-8')
+
         # refreshToken encoding
         refreshToken = jwt.encode(
             {
-                'userId': username,
+                'userId': userId,
                 'expired_refreshToken': expired_refreshToken
             },
-            ''+username,
+            ''+userId,
             algorithm = 'HS256'
         ).decode('utf-8')
-        accessToken = str(accessToken)
-        refreshToken = str(refreshToken)
+
+        # create tokens_data
         tokens_data = {
             "accessToken" : accessToken,
             "refreshToken" : refreshToken,
             "expired_accessToken" : expired_accessToken,
             "expired_refreshToken" : expired_refreshToken
         }
+
+        # search userId
         res = cls.es.search(
             index = "tokens",
             body = {
                 "query": {
                     "match" : {
-                        "_id" : username
+                        "_id" : userId
                     }
                 }
             })
+
         boolean_value = res["hits"]["total"]["value"]
+
         # userId가 DB에 없는 경우
         if boolean_value == 0:
-            res = cls.es.index(index="tokens",doc_type="_doc",id=username,body=tokens_data)
+            res = cls.es.index(index="tokens",doc_type="_doc",id=userId,body=tokens_data)
             return {
                 'statusCode': 200,
                 'body': {
@@ -128,10 +138,11 @@ class ElaAPI:
                     'refreshToken': refreshToken
                 }
             }
+
         # userId가 DB에 있는 경우
         else:
             for i in range(len(res["hits"]["hits"])):
-                if res["hits"]["hits"][i]["_id"] == username:
+                if res["hits"]["hits"][i]["_id"] == userId:
                     return {
                         'statusCode': 200,
                         'body': {
@@ -140,68 +151,69 @@ class ElaAPI:
                         }
                     }
     
-    '''
-        # 토큰 삭제
-        # @param {string} event.userId user id
-    '''
-    def tokens_delete(cls,username):
+    # 토큰 삭제
+    # @param {string} userId
+    def tokens_delete(cls,userId):
+        # search userId
         res = cls.es.search(
                 index = "users",
                 body = {
                     "query": {
                         "match" : {
-                            "_id" : username
+                            "_id" : userId
                         }
                     }
                 })
         boolean_value = res["hits"]["total"]["value"]
+        
+        # userId가 DB에 있는 경우
         if boolean_value == 1:
-            cls.es.delete(index="tokens",doc_type="_doc",id=username)
+            cls.es.delete(index="tokens",doc_type="_doc",id=userId)
 
 
-    '''
-        # login
-        # @param {string} event.userId user id
-        # @param {string} event.password user password
-        # @return {Object} status massege
-    '''
-    def login(cls,username,passwd):
-        # 아이디 존재 여부 탐색
+    # login
+    # @param {string} userId
+    # @param {string} passwd
+    # @return {Object} status massege
+    def login(cls,userId,passwd):
+        # search userId
         res = cls.es.search(
                 index = "users",
                 body = {
                     "query": {
                         "match" : {
-                            "_id" : username
+                            "_id" : userId
                         }
                     }
                 })
         boolean_value = res["hits"]["total"]["value"]
+        
         # 아이디 O
         if boolean_value == 1:
             ps = res["hits"]["hits"][0]["_source"]["password"]
+
             # 비밀번호 O
             if passwd == ps:
-                grantsId = cls.grants_dataInsert(username)
+                grantsId = cls.grants_dataInsert(userId)
                 return grantsId
+
             # 비밀번호 X
             else:
                 return {
                     'statusCode': 401,
-                    'body': 'Incorrect password'
+                    'body': 'Invalid user'
                 }
+
         # 아이디 X
         else:
             return {
                 'statusCode': 401,
-                'body': 'There is no userId'
+                'body': 'Invalid user'
             }
 
-    '''
-        # check whether grant exists
-        # @param {string} grant.body.grants grant id
-        # @return {Object} status massege
-    '''
+    # check whether grant exists
+    # @param {string} grant grant id
+    # @return {Object} status massege
     def checkGrants(cls,grant):
         res = cls.es.search(
             index = "grants",
@@ -217,6 +229,7 @@ class ElaAPI:
                 comp = True
                 break
 
+        # grant가 DB에 있는 경우
         if comp == True:
             return {
                 'statusCode': 200,
@@ -225,17 +238,17 @@ class ElaAPI:
                     'created': data["hits"]["hits"][i]['_source']['created']
                 }
             }
+
+        # grant가 DB에 없는 경우
         else:
             return {
                 'statusCode': 401,
-                'body': 'There is no userId'
+                'body': 'Invalid userId'
             }
 
-    '''
-        # check whether access token exists
-        # @param {string} token.body.accessToken access token
-        # @return {Object} status massege
-    '''
+    # check whether access token exists
+    # @param {string} token access token
+    # @return {Object} status massege
     def checkTokens(cls,token):
         res = cls.es.search(
             index = "tokens",
@@ -245,13 +258,13 @@ class ElaAPI:
         )
         data = json.dumps(res, ensure_ascii=False, indent=4)
         data = json.loads(data)
+        comp = False
         for i in range(len(data["hits"]["hits"])):
             if data["hits"]["hits"][i]["_source"]["accessToken"] == token:
                 comp = True
                 break
-            else:
-                comp = False
         
+        # grant가 DB에 있는 경우
         if comp == True:
             return {
                 'statusCode': 200,
@@ -260,17 +273,17 @@ class ElaAPI:
                     'expired_accessToken': data["hits"]["hits"][i]["_source"]["expired_accessToken"]
                 }
             }
+
+        # grant가 DB에 없는 경우
         else:
             return {
                 'statusCode': 401,
-                'body': 'There is no grantsId'
+                'body': 'Invalid user'
             }
 
-    '''
-        # check whether refresh token exists
-        # @param {string} token.body.refreshToken refresh token
-        # @return {Object} status massege
-    '''
+    # check whether refresh token exists
+    # @param {string} token refresh token
+    # @return {Object} status massege
     def checkReTokens(cls,refreshToken):
         res = cls.es.search(
             index = "tokens",
@@ -280,13 +293,13 @@ class ElaAPI:
         )
         data = json.dumps(res, ensure_ascii=False, indent=4)
         data = json.loads(data)
+        comp = False
         for i in range(len(data["hits"]["hits"])):
             if data["hits"]["hits"][i]["_source"]["refreshToken"] == refreshToken:
                 comp = True
                 break
-            else:
-                comp = False
         
+        # grant가 DB에 있는 경우
         if comp == True:
             return {
                 'statusCode': 200,
@@ -295,52 +308,58 @@ class ElaAPI:
                     'expired_refreshToken': data["hits"]["hits"][i]["_source"]["expired_refreshToken"]
                 }
             }
+
+        # grant가 DB에 없는 경우
         else:
             return {
                 'statusCode': 401,
-                'body': 'Expired RefreshToken'
+                'body': 'Invalid User'
             }
 
-    '''
-        # check whether user id exists
-        # @param {string} event.userId user id
-        # @return {Object} status massege
-    '''
-    def checkID(cls,username):
-        # 아이디 존재 여부 탐색
+    # check whether user id exists
+    # @param {string} userId
+    # @return {Object} status massege
+    def checkID(cls,userId):
+        # search userId
         res = cls.es.search(
                 index = "users",
                 body = {
                     "query": {
                         "match" : {
-                            "_id" : username
+                            "_id" : userId
                         }
                     }
                 })
+
         boolean_value = res["hits"]["total"]["value"]
+        
+        # userId가 DB에 있는 경우
         if boolean_value == 1:
             return {
                 'statusCode': 200,
                 'body': 'Success!!!!'
             }
+
+        # userId가 DB에 없는 경우
         else:
             return {
                 'statusCode': 401,
-                'body': 'Not equals ID'
+                'body': 'Invalid user'
             }
 
 # 객체 생성
 es = ElaAPI()
 
-'''
-    # @param {Object} event user account
-    # @param {string} event.userId user id
-    # @param {string} event.password user password
-    # @return {Object} status message
-'''
+# @param {Object} event user account
+# @param {string} event.userId user id
+# @param {string} event.password user password
+# @return {Object} status message
 def handler(event):
+    userId = event['userId']
+    passwd = event['password']
+
     # 보안 인증서 발급
-    grant = es.login(event['userId'], event['password'])
+    grant = es.login(userId, passwd) # 로그인
     time.sleep(1)
 
     # 로그인 검증 실패 시
@@ -349,8 +368,10 @@ def handler(event):
 
     # 로그인 검증 성공 시(보안 인증서 발급)
     else:
+        grantId = grant['body']['grants']
+        
         # 인증서 검증
-        compG = es.checkGrants(grant['body']['grants'])
+        compG = es.checkGrants(grantId)
 
         # 인증서 검증 실패 시
         if compG['statusCode'] == 401:
@@ -359,27 +380,29 @@ def handler(event):
         # 인증서 검증 성공 시
         else:
             created = compG['body']['created']
-            encoded = grant['body']['grants']
+
             # 암호화된 인증서 디코드
             decoded = jwt.decode(
-                encoded,
-                ''+event['userId']+created,
+                grantId,
+                ''+userId+created,
                 algorithms = ['HS256']
             )
+
+            decode_userId = decoded['userId']
             # 디코딩 결과의 userId와 DB의 userId가 다른 경우
-            if decoded['userId'] != event['userId']:
+            if decoded_userId != userId:
                 return {
                     'statusCode': 401,
-                    'body': 'UserId not equals'
+                    'body': 'Invalid user'
                 }
 
             # 디코딩 결과의 userId와 DB의 userId가 같은 경우
             else:
                 # 인증서 삭제
-                es.grants_delete(decoded['userId'])
+                es.grants_delete(decoded_userId)
 
                 # 액세스, 리프레시 토큰 발급
-                token = es.tokens_dataInsert(decoded['userId'])
+                token = es.tokens_dataInsert(decoded_userId)
 
                 # 액세스 토큰 검증
                 time.sleep(1)
@@ -389,8 +412,13 @@ def handler(event):
                     return comT
 
                 else:
+                    # expired_accessToken_time
                     at = comT['body']['expired_accessToken']
+
+                    # Type: string to datetime
                     dt = parse(at)
+
+                    # current time
                     nd = datetime.now()
                     
                     # 액세스 토큰 만료 시
@@ -403,7 +431,7 @@ def handler(event):
                     else:
                         decodeAt = jwt.decode(
                             token['body']['accessToken'],
-                            ''+event['userId'],
+                            ''+userId,
                             algorithms = ['HS256']
                         )
                         check = es.checkID(decodeAt['userId'])
@@ -422,8 +450,13 @@ def handler(event):
                     
                     # 검증 성공 시
                     else:
+                        # expired_refreshToken_time
                         at = checkRt['body']['expired_refreshToken']
+
+                        # Type: string to datetime
                         dt = parse(at)
+
+                        # current time
                         nd = datetime.now()
 
                         # 리프레시 토큰 만료 시
@@ -436,16 +469,19 @@ def handler(event):
                         else:
                             decodedRt = jwt.decode(
                                 token['body']['refreshToken'],
-                                ''+event['userId'],
+                                ''+userId,
                                 algorithms = ['HS256']
                             )
-                            check = es.checkID(decodedRt['userId'])
+
+                            decoded_userId = decodedRt['userId']
+
+                            check = es.checkID(decoded_userId)
                             # 리프레시 토큰으로 아이디 검증 성공 시
                             if check == 1:
                                 # 토큰 제거
-                                es.tokens_delete(decodedRt['userId'])
+                                es.tokens_delete(decoded_userId)
                                 # 토큰 삽입
-                                final = es.tokens_dataInsert(decodedRt['userId'])
+                                final = es.tokens_dataInsert(decoded_userId)
                                 return {
                                     'statusCode': 200,
                                     'body': {
@@ -458,7 +494,7 @@ def handler(event):
                             else:
                                 return {
                                     'statusCode': 401,
-                                    'body': 'Not equals ID'
+                                    'body': 'Invalid user'
                                 }
 
 if __name__ == "__main__":
